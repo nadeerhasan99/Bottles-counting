@@ -1,0 +1,116 @@
+clear; close all; clc;
+% Read the image
+
+img = imread('bottle_crate_images/bottle_crate_18.png'); % change image name to display count
+
+% subplot 1: Original Image
+subplot(2, 3, 1);
+imshow(img);
+title('Original Image');
+
+% Convert the image to grayscale if it's in color
+if ndims(img) == 3 && size(img, 3) == 3
+    img_gray = rgb2gray(img);
+else
+    img_gray = img;
+end
+
+% subplot 2: Grayscale Image
+subplot(2, 3, 2);
+imshow(img_gray);
+title('Grayscale Image');
+
+% top hat morphology
+im_th = imtophat(img_gray, strel('disk', 95));
+
+% subplot 3: Top-Hat Transformed Image
+subplot(2, 3, 3);
+imshow(im_th);
+title('Top-Hat Transformed Image');
+
+% Binarize the image   
+im_bin = imbinarize(im_th, graythresh(im_th));
+
+% subplot 4: Binarized Image
+subplot(2, 3, 4);
+imshow(im_bin);
+title('Binarized Image');
+
+% close morphological operation
+im_closed = imclose(im_bin, strel('disk', 2));
+
+% subplot 5: Closed Image
+subplot(2, 3, 5);
+imshow(im_closed);
+title('Closed Image');
+
+% Define the bounding box for the region of interest (ROI) (geometric operation)
+bbox = [50, 50, size(im_closed, 2) - 100, size(im_closed, 1) - 100]; % [x, y, width, height]
+
+% Create a binary mask for the ROI
+roi_mask = zeros(size(im_closed));
+roi_mask(bbox(2):bbox(2)+bbox(4)-1, bbox(1):bbox(1)+bbox(3)-1) = 1;
+
+% Apply the mask to the binary image
+im_roi = im_closed .* logical(roi_mask);
+
+% Hough transform to detect circles
+
+% detect the bottle cap
+[centers1, radii1, ~] = imfindcircles(im_roi, [12 23], ...
+                                       'ObjectPolarity', 'bright', ...
+                                       'Sensitivity', 0.92, ...
+                                       'EdgeThreshold', 0.1);
+
+% detect the bottle bottom
+[centers2, radii2, ~] = imfindcircles(im_roi, [30 50], ...
+                                       'ObjectPolarity', 'bright', ...
+                                       'Sensitivity', 0.92, ...
+                                       'EdgeThreshold', 0.1);
+
+% Combine the results from both detections
+all_centers = [centers1; centers2];
+all_radii = [radii1; radii2];
+
+% Post-process detected circles to remove or merge closely spaced circles
+[all_centers, all_radii] = merge_or_remove_circles(all_centers, all_radii);
+
+% Count the total number of circles detected after merging or removal
+num_circles = size(all_centers, 1);
+
+% Display the circles on the original grayscale image
+subplot(2, 3, [6]);
+imshow(img_gray);
+viscircles(all_centers, all_radii, 'EdgeColor', 'b'); % Overlay the detected circles
+text(10, 20, ['Total number of circles: ' num2str(num_circles)], 'Color', 'red', 'FontSize', 12, 'FontWeight', 'bold'); % write the total number on the image
+
+function [centers, radii] = merge_or_remove_circles(centers, radii)
+% Threshold for considering circles as closely spaced
+minDistanceThreshold = 50;
+
+% Initialize indices of circles to be removed
+circlesToRemove = [];
+
+% Loop through each pair of circles
+for i = 1:size(centers, 1)
+    for j = i+1:size(centers, 1)
+        % Calculate distance between circle centers
+        distance = sqrt((centers(i,1) - centers(j,1))^2 + (centers(i,2) - centers(j,2))^2);
+
+        % If the distance is less than the threshold, consider merging or removing circles
+        if distance < minDistanceThreshold
+            % Compare radii or other criteria to decide which circle to keep
+            % For simplicity, here we remove the circle with larger radius
+            if radii(i) > radii(j)
+                circlesToRemove = [circlesToRemove, i];
+            else
+                circlesToRemove = [circlesToRemove, j];
+            end
+        end
+    end
+end
+
+% Remove circles marked for removal
+centers(circlesToRemove, :) = [];
+radii(circlesToRemove) = [];
+end
